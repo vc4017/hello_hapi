@@ -1,105 +1,36 @@
 ---
-resources:
-  - name: pcfdemo
-    type: git
+resource_types:
+  - name: npm-cache
+    type: docker-image
     source:
-      uri: {{github-uri}}
-      branch: {{github-branch}}
+      repository: ymedlop/npm-cache-resource
+      tag: latest
 
-  - name: cf
-    type: cf
+resources:
+  - name: hello_hapi
+    type: git
+    source: &repo-source
+      uri: https://github.com/vc4017/hello_hapi.git
+      branch: master
+  - name: dependency-cache
+    type: npm-cache
     source:
-      api: {{cf-api}}
-      username: {{cf-username}}
-      password: {{cf-password}}
-      organization: {{cf-org}}
-      space: {{cf-space}}
-      skip_cert_check: true
+      <<: *repo-source
+      paths:
+        - package.json
 
 jobs:
-  - name: unit-test
-    public: true
+  - name: Install dependencies
     plan:
-      - get: pcfdemo
+      - get: hello_hapi
         trigger: true
-      - task: unit
-        file: pcfdemo/ci/tasks/unit.yml
-        params: &MAVENPARAMS
-          MAVEN_OPTS: {{maven-opts}}
-          MAVEN_CONFIG: {{maven-config}}
-
-  - name: build-artifact
-    serial_groups: [ version ]
+      - get: dependency-cache
+  - name: Run tests
     plan:
-      - get: pcfdemo
-        passed: [ unit-test ]
+      - get: hello_hapi
         trigger: true
-      - get: version
-        params: { pre: rc }
-      - task: build
-        file: pcfdemo/ci/tasks/build.yml
-        params:
-          <<: *MAVENPARAMS
-      - put: candidate-release
-        params: { file: build/pcf-demo-*.war }
-      - put: version
-        params: { file: version/number }
-
-  - name: integration-test
-    serial: true
-    plan:
-      - get: candidate-release
-        trigger: true
-        passed: [ build-artifact ]
-      - get: pcfdemo
-        passed: [ build-artifact ]
-      - get: version
-        passed: [ build-artifact ]
-      - task: prepare-integration
-        file: pcfdemo/ci/tasks/prepare-integration.yml
-        params:
-          CF_MANIFEST_HOST: {{cf-manifest-host}}
-      - put: cf
-        params:
-          manifest: prepare-integration/manifest.yml
-      - task: integration
-        file: pcfdemo/ci/tasks/integration.yml
-        params:
-          <<: *MAVENPARAMS
-
-  - name: ship-it
-    serial_groups: [ version ]
-    plan:
-      - get: candidate-release
-        passed: [ integration-test ]
-      - get: pcfdemo
-        passed: [ integration-test ]
-      - get: version
-        params: { bump: final }
-      - task: prepare-final
-        file: pcfdemo/ci/tasks/prepare-final.yml
-      - put: final-release
-        params: { file: prepare-final/pcf-demo-*.war }
-      - put: version
-        params: { file: version/number }
-
-  - name: major
-    serial_groups: [ version ]
-    plan:
-      - put: version
-        params: { bump: major, pre: rc }
-
-  - name: minor
-    serial_groups: [ version ]
-    plan:
-      - put: version
-        params: { bump: minor, pre: rc }
-
-  - name: patch
-    serial_groups: [ version ]
-    plan:
-      - get: version
-        passed: [ ship-it ]
-        trigger: true
-      - put: version
-        params: { bump: patch, pre: rc }
+        passed: [Install dependencies]
+      - get: dependency-cache
+        passed: [Install dependencies]
+      - task: run the test suite
+        file: hello_hapi/ci/tasks/run_tests.yml
